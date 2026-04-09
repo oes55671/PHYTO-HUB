@@ -852,7 +852,43 @@ def process_row(
             print(f"[dry-run] would download {meta.doi} -> {output_path}")
             return
 
-        download_pdf(session, pdf_url, output_path)
+        try:
+            download_pdf(session, pdf_url, output_path)
+        except RuntimeError as e:
+            if "Not a PDF response" in str(e):
+                append_index(
+                    index_path,
+                    {
+                        "timestamp": ts,
+                        "status": "SKIPPED_NOT_OA",
+                        "doi": meta.doi or "",
+                        "pmid": meta.pmid or "",
+                        "title": meta.title or "",
+                        "journal": meta.journal or "",
+                        "year": str(meta.year or ""),
+                        "topic": topic,
+                        "source_url": pdf_url,
+                        "error": str(e),
+                    },
+                )
+                if manual_collect_path:
+                    append_manual_collect(
+                        manual_collect_path,
+                        {
+                            "timestamp": ts,
+                            "reason": "NOT_PDF",
+                            "doi": meta.doi or "",
+                            "pmid": meta.pmid or "",
+                            "title": meta.title or "",
+                            "journal": meta.journal or "",
+                            "year": str(meta.year or ""),
+                            "topic": topic,
+                            "note": str(e),
+                        },
+                    )
+                print(f"[skip] non-pdf landing page: {meta.doi}")
+                return
+            raise
         drive_file_id = ""
 
         if drive_folder_id:
