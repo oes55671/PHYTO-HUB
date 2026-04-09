@@ -115,9 +115,12 @@ jobs:
             logs/parsed_from_radar.csv
 
       - name: Sync to Notion (optional)
-        if: ${{ secrets.NOTION_TOKEN != '' && secrets.NOTION_DATABASE_ID != '' }}
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         run: |
-          python scripts/sync_to_notion.py --input logs/paper_index.csv --limit 200
+          if [ -n "${NOTION_TOKEN}" ] && [ -n "${NOTION_DATABASE_ID}" ]; then
+            python scripts/sync_to_notion.py --input logs/paper_index.csv --limit 200
+          else
+            echo "Skipping Notion sync (NOTION_TOKEN / NOTION_DATABASE_ID not set)"
+          fi
