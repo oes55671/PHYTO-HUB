@@ -1,0 +1,133 @@
+name: Research Radar Ingest
+
+on:
+  workflow_dispatch:
+    inputs:
+      radar_input_path:
+        description: "Path to radar input file in repo"
+        required: false
+        default: "data/radar_sample.md"
+      dry_run:
+        description: "Run without download/upload"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    # Mon/Wed/Fri 09:00 Asia/Seoul == 00:00 UTC
+    - cron: "0 0 * * 1,3,5"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
+      DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+      OAUTH_CLIENT_SECRET_PATH: /tmp/client_secret.json
+      OAUTH_TOKEN_PATH: /tmp/token.json
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/service-account.json
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare optional auth files
+        run: |
+          if [ -n "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" ]; then
+            printf '%s' '${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}' > /tmp/service-account.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET_JSON }}" ]; then
+            printf '%s' '${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET_JSON }}' > /tmp/client_secret.json
+          fi
+          if [ -n "${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}" ]; then
+            printf '%s' '${{ secrets.GOOGLE_OAUTH_TOKEN_JSON }}' > /tmp/token.json
+          fi
+
+      - name: Run ingest
+        id: run_ingest
+        run: |
+          set -euo pipefail
+          RADAR_PATH="${{ github.event.inputs.radar_input_path }}"
+          if [ -z "$RADAR_PATH" ]; then RADAR_PATH="data/radar_sample.md"; fi
+
+          CMD=(python src/paper_ingest.py
+            --radar-input "$RADAR_PATH"
+            --parsed-csv-out logs/parsed_from_radar.csv
+            --radar-default-topic tissue-culture
+            --email "$CONTACT_EMAIL"
+            --index logs/paper_index.csv
+            --manual-collect logs/manual_collect.csv
+          )
+
+          if [ -n "$DRIVE_FOLDER_ID" ]; then
+            CMD+=(--drive-folder-id "$DRIVE_FOLDER_ID")
+          fi
+
+          if [ -f "$OAUTH_CLIENT_SECRET_PATH" ]; then
+            CMD+=(--oauth-client-secret "$OAUTH_CLIENT_SECRET_PATH")
+            CMD+=(--oauth-token "$OAUTH_TOKEN_PATH")
+          fi
+
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            CMD+=(--dry-run)
+          fi
+
+          "${CMD[@]}"
+
+      - name: Build manual report
+        id: report
+        run: |
+          python scripts/manual_collect_report.py logs/manual_collect.csv --out /tmp/manual_report.md
+          echo "has_manual=$(python - <<'PY'
+import csv
+from pathlib import Path
+p=Path('logs/manual_collect.csv')
+if not p.exists():
+    print('false')
+else:
+    with p.open(encoding='utf-8', newline='') as f:
+        rows=list(csv.DictReader(f))
+    print('true' if rows else 'false')
+PY
+)" >> "$GITHUB_OUTPUT"
+
+      - name: Create issue for manual queue
+        if: steps.report.outputs.has_manual == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Manual Collection Queue - $(date -u +%Y-%m-%d)"
+          gh issue create \
+            --title "$TITLE" \
+            --label "manual-collection" \
+            --body-file /tmp/manual_report.md
+
+      - name: Upload logs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-logs
+          path: |
+            logs/paper_index.csv
+            logs/manual_collect.csv
+            logs/parsed_from_radar.csv
+
+      - name: Sync to Notion (optional)
+        if: ${{ secrets.NOTION_TOKEN != '' && secrets.NOTION_DATABASE_ID != '' }}
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: |
+          python scripts/sync_to_notion.py --input logs/paper_index.csv --limit 200
