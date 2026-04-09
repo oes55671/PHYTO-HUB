@@ -91,18 +91,8 @@ jobs:
         id: report
         run: |
           python scripts/manual_collect_report.py logs/manual_collect.csv --out /tmp/manual_report.md
-          echo "has_manual=$(python - <<'PY'
-import csv
-from pathlib import Path
-p=Path('logs/manual_collect.csv')
-if not p.exists():
-    print('false')
-else:
-    with p.open(encoding='utf-8', newline='') as f:
-        rows=list(csv.DictReader(f))
-    print('true' if rows else 'false')
-PY
-)" >> "$GITHUB_OUTPUT"
+          HAS_MANUAL=$(python -c "import csv; from pathlib import Path; p=Path('logs/manual_collect.csv'); print('true' if (p.exists() and any(csv.DictReader(p.open(encoding='utf-8', newline='')))) else 'false')")
+          echo "has_manual=$HAS_MANUAL" >> "$GITHUB_OUTPUT"
 
       - name: Create issue for manual queue
         if: steps.report.outputs.has_manual == 'true'
