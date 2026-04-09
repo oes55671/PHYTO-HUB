@@ -1,0 +1,14 @@
+{
+  "papers": [
+    {
+      "title": "Organoid intelligence (OI): A new biocomputing frontier",
+      "doi": "10.1016/j.cell.2023.02.019",
+      "topic": "organoid"
+    },
+    {
+      "title": "Single-cell transcriptome profiling of human pancreas development",
+      "pmid": "32728272",
+      "topic": "pancreas"
+    }
+  ]
+}
