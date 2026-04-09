@@ -165,6 +165,10 @@ def build_session(email: str) -> "requests.Session":
     from requests.adapters import HTTPAdapter
     from urllib3.util.retry import Retry
 
+    clean_email = " ".join((email or "").split())
+    if not clean_email:
+        clean_email = "unknown@example.com"
+
     session = requests.Session()
     retry = Retry(
         total=4,
@@ -177,7 +181,7 @@ def build_session(email: str) -> "requests.Session":
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    session.headers.update({"User-Agent": USER_AGENT.format(email=email)})
+    session.headers.update({"User-Agent": USER_AGENT.format(email=clean_email)})
     return session
 
 
@@ -939,6 +943,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.email = " ".join((args.email or "").split())
 
     out_root = Path(args.output_dir)
     index_path = Path(args.index)
